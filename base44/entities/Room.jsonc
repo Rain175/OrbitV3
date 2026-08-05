@@ -1,0 +1,29 @@
+{
+  "name": "Room",
+  "type": "object",
+  "properties": {
+    "code": {
+      "type": "string"
+    },
+    "pet_name": {
+      "type": "string",
+      "default": "Mochi"
+    },
+    "hunger": {
+      "type": "number",
+      "default": 50
+    },
+    "happiness": {
+      "type": "number",
+      "default": 50
+    },
+    "sleep": {
+      "type": "number",
+      "default": 50
+    }
+  },
+  "required": [
+    "code",
+    "pet_name"
+  ]
+}

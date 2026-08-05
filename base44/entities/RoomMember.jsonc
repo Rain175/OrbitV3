@@ -1,0 +1,22 @@
+{
+  "name": "RoomMember",
+  "type": "object",
+  "properties": {
+    "room_id": {
+      "type": "string"
+    },
+    "user_id": {
+      "type": "string"
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "avatar_url": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "room_id",
+    "user_id"
+  ]
+}

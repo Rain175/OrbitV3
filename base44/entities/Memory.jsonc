@@ -1,0 +1,28 @@
+{
+  "name": "Memory",
+  "type": "object",
+  "properties": {
+    "room_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "memory_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "caption": {
+      "type": "string"
+    },
+    "image_url": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "room_id",
+    "title",
+    "memory_date",
+    "image_url"
+  ]
+}
