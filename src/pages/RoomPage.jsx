@@ -72,11 +72,26 @@ export default function RoomPage() {
   }, [theme]);
 
   useEffect(() => {
+    // Add timeout to auth check so we don't hang on PWA startup
+    const authTimeout = setTimeout(() => {
+      setLoading(false);
+      console.warn("Auth check timed out, proceeding with cached session");
+    }, 5000);
+
     db.auth
       .me()
-      .then((u) => setUser(u))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      .then((u) => {
+        clearTimeout(authTimeout);
+        setUser(u);
+        setLoading(false);
+      })
+      .catch((err) => {
+        clearTimeout(authTimeout);
+        console.error("Auth error:", err);
+        setLoading(false);
+      });
+
+    return () => clearTimeout(authTimeout);
   }, []);
 
   // Join room + load data
@@ -84,9 +99,19 @@ export default function RoomPage() {
     if (!user) return;
     let active = true;
     (async () => {
-      const joined = await joinRoom(code, user);
+      let joined = await joinRoom(code, user);
+      
+      // Retry once if timeout/network error (common on PWA startup)
+      if (!joined) {
+        console.log("First room join attempt failed, retrying...");
+        await new Promise(r => setTimeout(r, 1500));
+        if (!active) return;
+        joined = await joinRoom(code, user);
+      }
+
       if (!active) return;
       if (!joined) {
+        console.error("Room join failed after retries for code:", code);
         setNotFound(true);
         return;
       }
