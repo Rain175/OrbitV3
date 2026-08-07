@@ -90,6 +90,8 @@ export default function RoomPage() {
         setNotFound(true);
         return;
       }
+      // Store room code for PWA resume on app reopen
+      localStorage.setItem("orbit_last_room_code", code);
       setRoom(joined);
 
       const [mem, mus, people] = await Promise.all([
@@ -211,6 +213,7 @@ export default function RoomPage() {
     for (const m of myMemberships) {
       await db.entities.RoomMember.delete(m.id);
     }
+    localStorage.removeItem("orbit_last_room_code");
     toast.success("You left this orbit");
     navigate("/", { replace: true });
   }
