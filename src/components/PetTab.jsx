@@ -5,6 +5,7 @@ import { Drumstick, Gamepad2, Moon, Sparkles, Shirt, Heart, Bell, Sun } from "lu
 
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { clamp, isPetSleeping, wakeUpPet, sleepPet, calculateDecayedStats } from "@/lib/room";
 import PetCreature, { PET_SKINS } from "@/components/PetCreature";
@@ -35,15 +36,22 @@ function Meter({ label, value, tint }) {
   );
 }
 
-export default function PetTab({ room, partner, onLocalUpdate }) {
+export default function PetTab({ room, partner, myMember, onLocalUpdate }) {
   const tamagotchiName = partner?.display_name || partner?.full_name || room.pet_name || "Your Partner";
   const [burst, setBurst] = useState([]);
   const [skin, setSkin] = useState(() => {
-    return localStorage.getItem("orbit_my_pet_skin") || "classic";
+    return myMember?.skin || localStorage.getItem("orbit_my_pet_skin") || "classic";
   });
+  const [customSkinInput, setCustomSkinInput] = useState("");
   const [showSkinPicker, setShowSkinPicker] = useState(false);
   const [notifEnabled, setNotifEnabled] = useState(() => isNotificationGranted());
   const [sleeping, setSleeping] = useState(() => isPetSleeping(room.id));
+
+  useEffect(() => {
+    if (myMember?.skin) {
+      setSkin(myMember.skin);
+    }
+  }, [myMember?.skin]);
 
   const petRef = useRef(null);
 
@@ -189,10 +197,13 @@ export default function PetTab({ room, partner, onLocalUpdate }) {
     }
   }
 
-  function handleSelectSkin(sId) {
+  async function handleSelectSkin(sId) {
     setSkin(sId);
     localStorage.setItem("orbit_my_pet_skin", sId);
-    toast.success("Pet skin updated!");
+    if (myMember?.id) {
+      await db.entities.RoomMember.update(myMember.id, { skin: sId });
+    }
+    toast.success("Partner skin updated");
   }
 
   return (
@@ -252,7 +263,7 @@ export default function PetTab({ room, partner, onLocalUpdate }) {
               <PetCreature
                 mood={sleeping ? "sleepy" : (sleepVal < 20 ? "sleepy" : mood.mood)}
                 name={tamagotchiName}
-                skin={skin}
+                skin={partner?.skin || myMember?.skin || skin}
               />
             </div>
             {!sleeping && (
@@ -292,8 +303,8 @@ export default function PetTab({ room, partner, onLocalUpdate }) {
 
         {/* Skin Selector Modal / Panel */}
         {showSkinPicker && (
-          <div className="mt-6 w-full rounded-2xl border border-border/80 bg-background/95 p-4 shadow-xl backdrop-blur-md transition-all animate-in fade-in slide-in-from-bottom-2">
-            <div className="flex items-center justify-between mb-3">
+          <div className="mt-6 w-full rounded-2xl border border-border/80 bg-background/95 p-4 shadow-xl backdrop-blur-md transition-all animate-in fade-in slide-in-from-bottom-2 space-y-3">
+            <div className="flex items-center justify-between mb-1">
               <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
                 <Sparkles className="size-3.5 text-primary" /> Personal Pet Outfit
               </span>
@@ -320,6 +331,27 @@ export default function PetTab({ room, partner, onLocalUpdate }) {
                   <span className="truncate">{s.name}</span>
                 </button>
               ))}
+            </div>
+
+            <div className="flex gap-2 pt-1 border-t border-border/60">
+              <Input
+                value={customSkinInput}
+                onChange={(e) => setCustomSkinInput(e.target.value)}
+                placeholder="Paste custom PNG image URL..."
+                className="rounded-xl text-xs h-9"
+              />
+              <Button
+                size="sm"
+                variant="secondary"
+                className="rounded-xl h-9 text-xs shrink-0"
+                onClick={() => {
+                  if (!customSkinInput.trim()) return;
+                  handleSelectSkin(customSkinInput.trim());
+                  setCustomSkinInput("");
+                }}
+              >
+                Apply PNG
+              </Button>
             </div>
           </div>
         )}

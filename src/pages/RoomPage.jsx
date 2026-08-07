@@ -29,6 +29,7 @@ import ScrapbookTab from "@/components/ScrapbookTab";
 import MusicTab from "@/components/MusicTab";
 import GlobalMusicPlayer from "@/components/GlobalMusicPlayer";
 import { checkAndNotifyPetStatus } from "@/lib/notifications";
+import { PET_SKINS } from "@/components/PetCreature";
 
 export default function RoomPage() {
   const { code } = useParams();
@@ -44,6 +45,15 @@ export default function RoomPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [theme, setTheme] = useState(() => localStorage.getItem("orbit_theme") || "system");
   const [myMemberName, setMyMemberName] = useState("");
+  const [customSkinUrl, setCustomSkinUrl] = useState("");
+
+  async function updateMySkin(selectedSkin) {
+    localStorage.setItem("orbit_my_pet_skin", selectedSkin);
+    if (myMember?.id) {
+      await db.entities.RoomMember.update(myMember.id, { skin: selectedSkin });
+    }
+    toast.success("Partner skin updated");
+  }
 
   useEffect(() => {
     const root = document.documentElement;
@@ -322,6 +332,7 @@ export default function RoomPage() {
           <PetTab
             room={room}
             partner={partner}
+            myMember={myMember}
             onLocalUpdate={(patch) =>
               setRoom((r) => (r ? { ...r, ...patch } : r))
             }
@@ -465,6 +476,55 @@ export default function RoomPage() {
               </div>
               <p className="text-[11px] text-muted-foreground">
                 Your partner sees this name for your pet avatar in their Orbit.
+              </p>
+            </div>
+
+            {/* Partner Pet Skin */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center justify-between">
+                <span>Your Pet Skin (Seen by Partner)</span>
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {PET_SKINS.map((s) => {
+                  const currentSkin = myMember?.skin || localStorage.getItem("orbit_my_pet_skin") || "classic";
+                  return (
+                    <button
+                      key={s.id}
+                      onClick={() => updateMySkin(s.id)}
+                      className={`flex items-center gap-2 rounded-2xl border p-2 text-left transition-all text-xs ${
+                        currentSkin === s.id
+                          ? "border-primary bg-primary/10 font-bold ring-2 ring-primary/20 text-primary"
+                          : "border-border/60 hover:bg-secondary/60 text-muted-foreground"
+                      }`}
+                    >
+                      <span className="text-base">{s.icon}</span>
+                      <span className="truncate">{s.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="flex gap-2 pt-1">
+                <Input
+                  value={customSkinUrl}
+                  onChange={(e) => setCustomSkinUrl(e.target.value)}
+                  placeholder="Or paste PNG image URL..."
+                  className="rounded-2xl text-xs"
+                />
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    if (!customSkinUrl.trim()) return;
+                    updateMySkin(customSkinUrl.trim());
+                    setCustomSkinUrl("");
+                  }}
+                  className="rounded-2xl shrink-0 text-xs"
+                >
+                  Apply PNG
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Updates your pet outfit so your partner sees your chosen skin in their Orbit.
               </p>
             </div>
 
