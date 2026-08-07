@@ -1,0 +1,6 @@
+{
+  "name": "Orbit Love",
+  "description": "A Cozy Space for Long-Distance Couples: raise a shared pet, build a photo scrapbook, and listen to music together in sync.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

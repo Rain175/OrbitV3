@@ -1,0 +1,75 @@
+{
+  "name": "MusicState",
+  "type": "object",
+  "properties": {
+    "room_id": {
+      "type": "string"
+    },
+    "video_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "artist": {
+      "type": "string"
+    },
+    "thumbnail": {
+      "type": "string"
+    },
+    "duration": {
+      "type": "number"
+    },
+    "is_playing": {
+      "type": "boolean",
+      "default": false
+    },
+    "position_seconds": {
+      "type": "number",
+      "default": 0
+    },
+    "queue": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "videoId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "artist": {
+            "type": "string"
+          },
+          "thumbnail": {
+            "type": "string"
+          },
+          "duration": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "queue_index": {
+      "type": "number",
+      "default": 0
+    },
+    "repeat_mode": {
+      "type": "string",
+      "enum": [
+        "off",
+        "all",
+        "one"
+      ],
+      "default": "off"
+    },
+    "shuffle": {
+      "type": "boolean",
+      "default": false
+    }
+  },
+  "required": [
+    "room_id"
+  ]
+}

@@ -1,0 +1,199 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 38 30% 97%;
+    --foreground: 20 25% 32%;
+    --card: 60 15% 98%;
+    --card-foreground: 20 25% 32%;
+    --popover: 60 15% 98%;
+    --popover-foreground: 20 25% 32%;
+    --primary: 12 58% 60%;
+    --primary-foreground: 60 20% 98%;
+    --secondary: 38 55% 89%;
+    --secondary-foreground: 25 30% 38%;
+    --muted: 45 25% 94%;
+    --muted-foreground: 30 20% 55%;
+    --accent: 200 35% 82%;
+    --accent-foreground: 220 25% 32%;
+    --destructive: 25 70% 55%;
+    --destructive-foreground: 60 20% 98%;
+    --border: 40 25% 87%;
+    --input: 40 25% 87%;
+    --ring: 12 58% 60%;
+    --chart-1: 12 58% 60%;
+    --chart-2: 38 55% 70%;
+    --chart-3: 200 30% 65%;
+    --chart-4: 320 35% 68%;
+    --chart-5: 150 30% 68%;
+    --radius: 1.25rem;
+    --font-heading: "Baloo 2", ui-rounded, system-ui, sans-serif;
+    --font-body: "Quicksand", ui-rounded, system-ui, sans-serif;
+    --font-display: "Baloo 2", ui-rounded, system-ui, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    --sidebar-background: 45 25% 95%;
+    --sidebar-foreground: 20 25% 32%;
+    --sidebar-primary: 12 58% 60%;
+    --sidebar-primary-foreground: 60 20% 98%;
+    --sidebar-accent: 38 55% 89%;
+    --sidebar-accent-foreground: 25 30% 38%;
+    --sidebar-border: 40 25% 87%;
+    --sidebar-ring: 12 58% 60%;
+    --gradient-sky: linear-gradient(160deg, hsl(40 45% 96%) 0%, hsl(20 35% 96%) 45%, hsl(300 30% 96%) 100%);
+    --gradient-love: linear-gradient(100deg, hsl(12 58% 62%), hsl(38 55% 68%));
+    --shadow-soft: 0 10px 30px -12px hsl(20 30% 40% / 0.35);
+    --shadow-pop: 0 6px 0 0 hsl(15 40% 45% / 0.35);
+  }
+
+  .dark {
+    --background: 228 35% 8%;
+    --foreground: 210 40% 98%;
+    --card: 228 30% 12%;
+    --card-foreground: 210 40% 98%;
+    --popover: 228 30% 12%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 262 83% 68%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 228 25% 18%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 228 22% 16%;
+    --muted-foreground: 220 20% 70%;
+    --accent: 265 40% 25%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 228 25% 22%;
+    --input: 228 25% 22%;
+    --ring: 262 83% 68%;
+    --chart-1: 330 85% 65%;
+    --chart-2: 262 83% 68%;
+    --chart-3: 195 85% 65%;
+    --chart-4: 45 90% 65%;
+    --chart-5: 160 70% 60%;
+    --sidebar-background: 228 35% 8%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-primary: 262 83% 68%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 228 25% 18%;
+    --sidebar-accent-foreground: 210 40% 98%;
+    --sidebar-border: 228 25% 22%;
+    --sidebar-ring: 262 83% 68%;
+    --gradient-sky: radial-gradient(circle at 15% 20%, rgba(147, 51, 234, 0.18) 0%, transparent 45%), radial-gradient(circle at 85% 70%, rgba(236, 72, 153, 0.15) 0%, transparent 45%), radial-gradient(circle at 50% 50%, rgba(59, 130, 246, 0.1) 0%, transparent 60%), linear-gradient(170deg, #070a14 0%, #0b1120 40%, #120e2e 80%, #05070f 100%);
+    --gradient-love: linear-gradient(100deg, hsl(262 83% 68%), hsl(330 85% 65%));
+    --shadow-soft: 0 10px 30px -12px rgba(0, 0, 0, 0.8), 0 0 20px -5px rgba(147, 51, 234, 0.15);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    background: var(--gradient-sky);
+    background-attachment: fixed;
+    min-height: 100vh;
+    @apply text-foreground font-body;
+  }
+
+  .dark body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: -1;
+    background-image: 
+      radial-gradient(1.5px 1.5px at 12% 18%, rgba(255, 255, 255, 0.85), transparent),
+      radial-gradient(1px 1px at 28% 38%, rgba(255, 255, 255, 0.65), transparent),
+      radial-gradient(2px 2px at 42% 72%, rgba(192, 132, 252, 0.9), transparent),
+      radial-gradient(1.5px 1.5px at 62% 22%, rgba(255, 255, 255, 0.75), transparent),
+      radial-gradient(1px 1px at 78% 88%, rgba(255, 255, 255, 0.55), transparent),
+      radial-gradient(2px 2px at 90% 42%, rgba(244, 114, 182, 0.85), transparent),
+      radial-gradient(1px 1px at 96% 12%, rgba(255, 255, 255, 0.65), transparent),
+      radial-gradient(1.5px 1.5px at 32% 92%, rgba(147, 197, 253, 0.8), transparent);
+    background-size: 500px 500px;
+    opacity: 0.65;
+    animation: cosmicShimmer 10s ease-in-out infinite alternate;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: var(--font-display);
+  }
+}
+
+@layer utilities {
+  .card-cute {
+    background-color: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    border-radius: calc(var(--radius) + 8px);
+    box-shadow: var(--shadow-soft);
+  }
+
+  .gradient-love {
+    background-image: var(--gradient-love);
+  }
+}
+
+@keyframes bob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-1deg);
+  }
+  50% {
+    transform: translateY(-10px) rotate(1deg);
+  }
+}
+
+@keyframes pop {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes floatUp {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(0.6);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-90px) scale(1.3);
+  }
+}
+
+@keyframes cosmicShimmer {
+  0% {
+    opacity: 0.45;
+    transform: translateY(0px) scale(1);
+  }
+  50% {
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0.55;
+    transform: translateY(-8px) scale(1.02);
+  }
+}
+
+.animate-bob {
+  animation: bob 3.5s ease-in-out infinite;
+}
+
+.animate-pop {
+  animation: pop 0.45s ease-out;
+}
+
+.animate-float-up {
+  animation: floatUp 1.4s ease-out forwards;
+}
