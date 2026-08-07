@@ -17,23 +17,48 @@ export function formatTime(seconds) {
 }
 
 export async function joinRoom(code, user) {
-  const rooms = await db.entities.Room.filter({ code });
-  if (!rooms.length) return null;
-  const room = rooms[0];
+  // Timeout wrapper to prevent hanging on PWA startup when Firebase isn't ready
+  const withTimeout = (promise, ms = 8000) => {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`Database query timeout after ${ms}ms`)), ms)
+      )
+    ]);
+  };
 
-  const existing = await db.entities.RoomMember.filter({
-    room_id: room.id,
-    user_id: user.id,
-  });
-  if (!existing.length) {
-    await db.entities.RoomMember.create({
-      room_id: room.id,
-      user_id: user.id,
-      display_name: user.full_name || user.email || "Someone",
-      avatar_url: null,
-    });
+  try {
+    const rooms = await withTimeout(db.entities.Room.filter({ code }), 8000);
+    if (!rooms.length) {
+      console.warn(`Room with code ${code} not found`);
+      return null;
+    }
+    const room = rooms[0];
+
+    const existing = await withTimeout(
+      db.entities.RoomMember.filter({
+        room_id: room.id,
+        user_id: user.id,
+      }),
+      5000
+    );
+    
+    if (!existing.length) {
+      await withTimeout(
+        db.entities.RoomMember.create({
+          room_id: room.id,
+          user_id: user.id,
+          display_name: user.full_name || user.email || "Someone",
+          avatar_url: null,
+        }),
+        5000
+      );
+    }
+    return room;
+  } catch (err) {
+    console.error(`joinRoom failed for code ${code}:`, err.message);
+    return null;
   }
-  return room;
 }
 
 export function isNightTime() {
