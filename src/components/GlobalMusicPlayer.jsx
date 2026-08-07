@@ -68,6 +68,10 @@ export default function GlobalMusicPlayer({ room, music, activeTab, setActiveTab
   const [scrubbing, setScrubbing] = useState(false);
   const [volume, setVolume] = useState(0.8);
   const [muted, setMuted] = useState(false);
+  // Tracks stream-health so we can detect + recover from a dead/expired
+  // stream URL (e.g. after Android does a network handoff in the
+  // background) instead of just silently going quiet.
+  const streamHealth = useRef({ lastPos: 0, lastAdvance: Date.now(), reloading: false });
 
   const videoId = music?.video_id ?? null;
   const playing = music?.is_playing ?? false;
@@ -86,6 +90,37 @@ export default function GlobalMusicPlayer({ room, music, activeTab, setActiveTab
     }
     return audioRef.current?.currentTime ?? 0;
   }
+
+  // Re-fetches a fresh stream URL for the current track and resumes from
+  // roughly where playback died. Piped/CDN stream URLs are time-limited and
+  // often IP-bound, so they can go dead mid-playback (very commonly right
+  // after Android backgrounds the tab and does a network handoff). Without
+  // this, that shows up as "music instantly stops when I switch apps".
+  const reloadStream = useCallback(async (resumeAt) => {
+    if (engine.current !== "html5") return;
+    const id = loadedFor.current;
+    const audio = audioRef.current;
+    if (!id || !audio || streamHealth.current.reloading) return;
+
+    streamHealth.current.reloading = true;
+    const wasPlaying = musicRef.current?.is_playing ?? false;
+    const resumePos = resumeAt ?? (audio.currentTime || expectedPosition(musicRef.current));
+
+    try {
+      const stream = await getAudioStream(id);
+      if (loadedFor.current !== id) return; // track changed while we were fetching
+      audio.src = stream.url;
+      audio.currentTime = resumePos;
+      if (wasPlaying) await audio.play().catch(() => undefined);
+    } catch (e) {
+      // Network's probably actually down; the stall watchdog / next error
+      // event will retry.
+    } finally {
+      streamHealth.current.reloading = false;
+      streamHealth.current.lastAdvance = Date.now();
+      streamHealth.current.lastPos = audio?.currentTime ?? 0;
+    }
+  }, []);
 
   const push = useCallback(
     async (patch) => {
@@ -245,16 +280,31 @@ export default function GlobalMusicPlayer({ room, music, activeTab, setActiveTab
     });
   }, [push]);
 
-  // Continuously update position while playing
+  // Continuously update position while playing, and watch for stalls: if
+  // we're supposedly playing but currentTime hasn't advanced for a while,
+  // the stream URL has likely gone dead (this is the main failure mode
+  // behind "audio dies as soon as the app is backgrounded" on Android/CDN
+  // streams) — reconnect automatically instead of just going silent.
   useEffect(() => {
     if (!playing) return;
+    streamHealth.current = { lastPos: currentTime(), lastAdvance: Date.now(), reloading: false };
     const timer = setInterval(() => {
       const cur = currentTime();
       if (cur > 0) setPosition(cur);
       else setPosition(expectedPosition(musicRef.current));
+
+      if (engine.current === "html5") {
+        const health = streamHealth.current;
+        if (cur > health.lastPos + 0.25) {
+          health.lastPos = cur;
+          health.lastAdvance = Date.now();
+        } else if (!health.reloading && Date.now() - health.lastAdvance > 5000) {
+          reloadStream(health.lastPos);
+        }
+      }
     }, 400);
     return () => clearInterval(timer);
-  }, [playing, videoId]);
+  }, [playing, videoId, reloadStream]);
 
   // Load the track
   useEffect(() => {
@@ -384,6 +434,11 @@ export default function GlobalMusicPlayer({ room, music, activeTab, setActiveTab
         onTimeUpdate={() => {
           if (!scrubbing && engine.current === "html5") {
             setPosition(audioRef.current?.currentTime ?? 0);
+          }
+        }}
+        onError={() => {
+          if (engine.current === "html5" && loadedFor.current) {
+            reloadStream();
           }
         }}
         onEnded={() => skipNext(false)}
