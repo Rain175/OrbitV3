@@ -2,10 +2,7 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import base44 from '@base44/vite-plugin'
-<<<<<<< HEAD
 import { VitePWA } from 'vite-plugin-pwa'
-=======
->>>>>>> 13e6b186c4ffabcc0788291c04a71030eb4d1a80
 import path from 'path'
 
 // https://vite.dev/config/
@@ -21,7 +18,6 @@ export default defineConfig({
       visualEditAgent: true
     }),
     react(),
-<<<<<<< HEAD
     VitePWA({
       registerType: 'prompt',
       // We register the service worker ourselves (see src/components/PWAUpdatePrompt.jsx)
@@ -99,8 +95,6 @@ export default defineConfig({
         type: 'module',
       },
     }),
-=======
->>>>>>> 13e6b186c4ffabcc0788291c04a71030eb4d1a80
   ],
   resolve: {
     alias: {
