@@ -46,27 +46,43 @@ export default function Onboarding() {
       return;
     }
 
-    // Slower fallback: query database for latest room
+    // Slower fallback: query database for latest room (with timeout)
     let active = true;
-    (async () => {
-      const members = await db.entities.RoomMember.filter({ user_id: user.id });
-      if (!active) return;
-      if (members.length > 0) {
-        members.sort(
-          (a, b) => new Date(b.created_date) - new Date(a.created_date)
-        );
-        const latest = members[0];
-        const room = await db.entities.Room.get(latest.room_id);
-        if (room?.code && active) {
-          localStorage.setItem("orbit_last_room_code", room.code);
-          navigate(`/room/${room.code}`, { replace: true });
-          return;
-        }
+    let queryTimeout = setTimeout(() => {
+      if (active) {
+        console.warn("Room lookup timed out, showing onboarding");
+        setChecking(false);
       }
-      setChecking(false);
+    }, 6000);
+
+    (async () => {
+      try {
+        const members = await db.entities.RoomMember.filter({ user_id: user.id });
+        if (!active) return;
+        if (members.length > 0) {
+          members.sort(
+            (a, b) => new Date(b.created_date) - new Date(a.created_date)
+          );
+          const latest = members[0];
+          const room = await db.entities.Room.get(latest.room_id);
+          if (room?.code && active) {
+            clearTimeout(queryTimeout);
+            localStorage.setItem("orbit_last_room_code", room.code);
+            navigate(`/room/${room.code}`, { replace: true });
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Room lookup error:", err);
+      }
+      if (active) {
+        clearTimeout(queryTimeout);
+        setChecking(false);
+      }
     })();
     return () => {
       active = false;
+      clearTimeout(queryTimeout);
     };
   }, [user?.id, loading]);
 
