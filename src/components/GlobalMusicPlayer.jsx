@@ -179,6 +179,33 @@ export default function GlobalMusicPlayer({ room, music, activeTab, setActiveTab
     [nextIndex, push]
   );
 
+  const skipPrev = useCallback(async () => {
+    const list = musicRef.current?.queue ?? [];
+    const idx = musicRef.current?.queue_index ?? 0;
+    const curPos = currentTime() > 0 ? currentTime() : expectedPosition(musicRef.current);
+
+    // Scrubbed in more than 4s? Restart the current track instead of going back.
+    if (curPos > 4 || idx === 0) {
+      engineSeek(0);
+      await push({ position_seconds: 0, is_playing: true });
+      return;
+    }
+
+    const track = list[idx - 1];
+    if (!track) return;
+    await push({
+      video_id: track.videoId,
+      title: track.title,
+      artist: track.artist,
+      thumbnail: track.thumbnail,
+      duration: track.duration,
+      queue: list,
+      queue_index: idx - 1,
+      is_playing: true,
+      position_seconds: 0,
+    });
+  }, [push]);
+
   async function playViaYouTube(id, startAt, autoplay) {
     engine.current = "yt";
     audioRef.current?.pause();
@@ -284,7 +311,11 @@ export default function GlobalMusicPlayer({ room, music, activeTab, setActiveTab
     else enginePause();
   }, [music?.is_playing, music?.position_seconds, music?.updated_date, videoId, readyId]);
 
-  // MediaSession API integration for OS/Background audio controls
+  // MediaSession API integration for OS/Background audio controls.
+  // This is what tells the OS "a real media session is active", which is the
+  // main thing that keeps iOS/Android from suspending audio once the
+  // app/tab is minimized, and what powers the lock-screen / notification
+  // controls while it's backgrounded.
   useEffect(() => {
     if (!("mediaSession" in navigator) || !music?.title) return;
 
@@ -293,21 +324,52 @@ export default function GlobalMusicPlayer({ room, music, activeTab, setActiveTab
         title: music.title,
         artist: music.artist || "Orbit Music",
         artwork: music.thumbnail
-          ? [{ src: music.thumbnail, sizes: "512x512", type: "image/jpeg" }]
+          ? [
+              { src: music.thumbnail, sizes: "96x96", type: "image/jpeg" },
+              { src: music.thumbnail, sizes: "256x256", type: "image/jpeg" },
+              { src: music.thumbnail, sizes: "512x512", type: "image/jpeg" },
+            ]
           : [],
       });
 
       navigator.mediaSession.setActionHandler("play", () => togglePlay());
       navigator.mediaSession.setActionHandler("pause", () => togglePlay());
       navigator.mediaSession.setActionHandler("nexttrack", () => skipNext(true));
+      navigator.mediaSession.setActionHandler("previoustrack", () => skipPrev());
       navigator.mediaSession.setActionHandler("seekto", (details) => {
         if (details.seekTime !== undefined) {
           engineSeek(details.seekTime);
           push({ position_seconds: details.seekTime });
+          try {
+            if (duration > 0) {
+              navigator.mediaSession.setPositionState({
+                duration,
+                position: Math.min(details.seekTime, duration),
+                playbackRate: 1,
+              });
+            }
+          } catch (e) {}
         }
       });
     } catch (e) {}
-  }, [music?.title, music?.artist, music?.thumbnail, togglePlay, skipNext, push]);
+  }, [music?.title, music?.artist, music?.thumbnail, duration, togglePlay, skipNext, skipPrev, push]);
+
+  // Keep playbackState + the lock-screen scrubber in sync. playbackState in
+  // particular matters: browsers use it to decide whether to keep showing
+  // (and keep alive) the background "Now Playing" session.
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    try {
+      navigator.mediaSession.playbackState = playing ? "playing" : "paused";
+      if (duration > 0 && "setPositionState" in navigator.mediaSession) {
+        navigator.mediaSession.setPositionState({
+          duration,
+          position: Math.min(position, duration),
+          playbackRate: 1,
+        });
+      }
+    } catch (e) {}
+  }, [playing, duration, position]);
 
   // Volume
   useEffect(() => {
