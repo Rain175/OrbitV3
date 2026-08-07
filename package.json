@@ -97,7 +97,11 @@
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.2",
+<<<<<<< HEAD
     "vite": "^6.1.0",
     "vite-plugin-pwa": "^0.21.1"
+=======
+    "vite": "^6.1.0"
+>>>>>>> 13e6b186c4ffabcc0788291c04a71030eb4d1a80
   }
 }
