@@ -8,6 +8,7 @@ export const PET_SKINS = [
   { id: "midnight", name: "Midnight Kitty", icon: "🐱", color: "#6366f1" },
   { id: "matcha", name: "Froggy Matcha", icon: "🐸", color: "#10b981" },
   { id: "unicorn", name: "Starry Unicorn", icon: "🦄", color: "#a855f7" },
+  { id: "custom_cat", name: "Kiss", icon: "🐱", color: "#f472b6", image: "/kiss_hoodie.png" },
 ];
 
 export default function PetCreature({ mood, name, skin = "classic" }) {
