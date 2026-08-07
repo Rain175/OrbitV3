@@ -2,6 +2,7 @@ const db = globalThis.__B44_DB__ || { auth:{ isAuthenticated: async()=>false, me
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Sparkles,
   ListMusic,
   Loader2,
   Music2,
@@ -24,45 +25,42 @@ import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
 import { toast } from "sonner";
 import { formatTime } from "@/lib/room";
-import { getAudioStream, searchTracks } from "@/lib/music";
+import { getQueueSuggestions, getSuggestions, searchTracks } from "@/lib/music";
 
-let ytApi = null;
-function loadYouTubeApi() {
-  if (window.YT?.Player) return Promise.resolve(window.YT);
-  if (!ytApi) {
-    ytApi = new Promise((resolve) => {
-      const prev = window.onYouTubeIframeAPIReady;
-      window.onYouTubeIframeAPIReady = () => {
-        prev?.();
-        resolve(window.YT);
-      };
-      const script = document.createElement("script");
-      script.src = "https://www.youtube.com/iframe_api";
-      document.head.appendChild(script);
-    });
+function parseTimestamp(ts) {
+  if (!ts) return Date.now();
+  if (typeof ts === "number") return ts;
+  if (typeof ts === "string") {
+    const parsed = new Date(ts).getTime();
+    return isNaN(parsed) ? Date.now() : parsed;
   }
-  return ytApi;
+  if (typeof ts === "object") {
+    if (typeof ts.toDate === "function") return ts.toDate().getTime();
+    if (typeof ts.seconds === "number") return ts.seconds * 1000;
+  }
+  return Date.now();
 }
 
 function expectedPosition(state) {
+  if (!state || typeof state.position_seconds !== "number") return 0;
   if (!state.is_playing) return state.position_seconds;
-  const drift = (Date.now() - new Date(state.updated_date).getTime()) / 1000;
-  return state.position_seconds + Math.max(0, drift);
+  const lastUpdated = parseTimestamp(state.updated_date);
+  const drift = (Date.now() - lastUpdated) / 1000;
+  return Math.max(0, state.position_seconds + Math.max(0, drift));
 }
 
 export default function MusicTab({ room, music }) {
-  const audioRef = useRef(null);
-  const ytHostRef = useRef(null);
-  const ytRef = useRef(null);
-  const engine = useRef("html5");
-  const loadedFor = useRef(null);
   const musicRef = useRef(music);
   const musicIdRef = useRef(music?.id ?? null);
-  const [readyId, setReadyId] = useState(null);
+  const searchContainerRef = useRef(null);
+
   const [query, setQuery] = useState("");
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [results, setResults] = useState([]);
+  const [queueSuggestions, setQueueSuggestions] = useState([]);
+  const [loadingQueueSuggestions, setLoadingQueueSuggestions] = useState(false);
   const [searching, setSearching] = useState(false);
-  const [buffering, setBuffering] = useState(false);
   const [position, setPosition] = useState(0);
   const [scrubbing, setScrubbing] = useState(false);
   const [volume, setVolume] = useState(0.8);
@@ -81,11 +79,48 @@ export default function MusicTab({ room, music }) {
     musicIdRef.current = music?.id ?? null;
   }, [music]);
 
+  // Close suggestions when clicking outside
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target)) {
+        setShowSuggestions(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("touchstart", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("touchstart", handleClickOutside);
+    };
+  }, []);
+
+  // Sync position slider
+  useEffect(() => {
+    if (!scrubbing && music) {
+      setPosition(expectedPosition(music));
+    }
+  }, [music, scrubbing]);
+
+  // Continuously advance position while playing
+  useEffect(() => {
+    if (!playing || scrubbing) return;
+    const interval = setInterval(() => {
+      setPosition(expectedPosition(musicRef.current));
+    }, 400);
+    return () => clearInterval(interval);
+  }, [playing, scrubbing]);
+
   const push = useCallback(
     async (patch) => {
       const current = musicRef.current;
+      const curPos = expectedPosition(current);
+      const patchWithPos = { ...patch };
+      if (patchWithPos.position_seconds === undefined) {
+        patchWithPos.position_seconds = curPos;
+      }
+
       if (musicIdRef.current) {
-        await db.entities.MusicState.update(musicIdRef.current, patch);
+        await db.entities.MusicState.update(musicIdRef.current, patchWithPos);
       } else {
         const fullData = {
           room_id: room.id,
@@ -100,7 +135,7 @@ export default function MusicTab({ room, music }) {
           queue_index: current?.queue_index ?? 0,
           repeat_mode: current?.repeat_mode ?? "off",
           shuffle: current?.shuffle ?? false,
-          ...patch,
+          ...patchWithPos,
         };
         const created = await db.entities.MusicState.create(fullData);
         musicIdRef.current = created.id;
@@ -108,50 +143,6 @@ export default function MusicTab({ room, music }) {
     },
     [room.id]
   );
-
-  function currentTime() {
-    if (engine.current === "yt") return ytRef.current?.getCurrentTime?.() ?? 0;
-    return audioRef.current?.currentTime ?? 0;
-  }
-
-  function engineSeek(seconds) {
-    if (engine.current === "yt") ytRef.current?.seekTo?.(seconds, true);
-    else if (audioRef.current) audioRef.current.currentTime = seconds;
-  }
-
-  function enginePlay() {
-    if (engine.current === "yt") ytRef.current?.playVideo?.();
-    else void audioRef.current?.play().catch(() => undefined);
-  }
-
-  function enginePause() {
-    if (engine.current === "yt") ytRef.current?.pauseVideo?.();
-    else audioRef.current?.pause();
-  }
-
-  async function playViaYouTube(id, startAt, autoplay) {
-    engine.current = "yt";
-    audioRef.current?.pause();
-    const YT = await loadYouTubeApi();
-    if (!ytRef.current && ytHostRef.current) {
-      ytRef.current = new YT.Player(ytHostRef.current, {
-        height: "1",
-        width: "1",
-        playerVars: { playsinline: 1, controls: 0 },
-      });
-      await new Promise((done) => {
-        const check = setInterval(() => {
-          if (ytRef.current?.loadVideoById) {
-            clearInterval(check);
-            done();
-          }
-        }, 120);
-      });
-    }
-    ytRef.current?.setVolume?.(muted ? 0 : Math.round(volume * 100));
-    if (autoplay) ytRef.current?.loadVideoById?.(id, startAt);
-    else ytRef.current?.cueVideoById?.(id, startAt);
-  }
 
   function trackPatch(track) {
     return {
@@ -176,6 +167,40 @@ export default function MusicTab({ room, music }) {
       });
     },
     [push, queue]
+  );
+
+  const playNow = useCallback(
+    async (track) => {
+      setShowSuggestions(false);
+      setSuggestions([]);
+      const current = musicRef.current;
+      const currentQueue = current?.queue ?? [];
+      const queueTrack = {
+        videoId: track.videoId,
+        title: track.title,
+        artist: track.artist,
+        thumbnail: track.thumbnail,
+        duration: track.duration,
+      };
+
+      // Add to queue and play immediately
+      const nextQueue = [...currentQueue, queueTrack];
+      const newIndex = nextQueue.length - 1;
+
+      await push({
+        ...trackPatch(queueTrack),
+        queue: nextQueue,
+        queue_index: newIndex,
+        is_playing: true,
+        position_seconds: 0,
+      });
+
+      toast.success(`Playing ${track.title}`);
+
+      // Remove from queue suggestions if present
+      setQueueSuggestions((prev) => prev.filter((s) => s.videoId !== track.videoId));
+    },
+    [push]
   );
 
   const nextIndex = useCallback((manual) => {
@@ -209,108 +234,73 @@ export default function MusicTab({ room, music }) {
   const skipPrev = useCallback(async () => {
     const list = musicRef.current?.queue ?? [];
     const idx = musicRef.current?.queue_index ?? 0;
-    if (currentTime() > 4 || idx === 0) {
+    if (position > 4 || idx === 0) {
       await push({ position_seconds: 0, is_playing: true });
       return;
     }
     await playAt(idx - 1, list);
-  }, [playAt, push]);
+  }, [playAt, position, push]);
 
   const togglePlay = useCallback(async () => {
+    const curPos = expectedPosition(musicRef.current);
     await push({
       is_playing: !(musicRef.current?.is_playing ?? false),
-      position_seconds: currentTime(),
+      position_seconds: curPos,
     });
   }, [push]);
 
-  // load the shared track
+  // Autocomplete debounced search predictions
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    if (loadedFor.current === videoId) return;
-
-    setReadyId(null);
-    audio.pause();
-    audio.removeAttribute("src");
-    audio.load();
-    ytRef.current?.stopVideo?.();
-    ytRef.current?.pauseVideo?.();
-    setPosition(0);
-
-    if (!videoId) {
-      loadedFor.current = null;
-      setBuffering(false);
+    if (!query || query.trim().length < 2) {
+      setSuggestions([]);
+      setShowSuggestions(false);
       return;
     }
+    const timer = setTimeout(async () => {
+      try {
+        const list = await getSuggestions(query);
+        setSuggestions(list);
+        setShowSuggestions(list.length > 0);
+      } catch (e) {
+        setSuggestions([]);
+      }
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [query]);
 
-    loadedFor.current = videoId;
-    const requestedFor = videoId;
-    const startAt = music ? expectedPosition(music) : 0;
-    setBuffering(true);
-    getAudioStream(requestedFor)
-      .then((stream) => {
-        if (loadedFor.current !== requestedFor) return;
-        engine.current = "html5";
-        ytRef.current?.stopVideo?.();
-        audio.src = stream.url;
-        audio.currentTime = startAt;
-        setReadyId(requestedFor);
-        if (playing) void audio.play().catch(() => undefined);
-      })
-      .catch(async () => {
-        if (loadedFor.current !== requestedFor) return;
-        await playViaYouTube(requestedFor, startAt, playing);
-        if (loadedFor.current === requestedFor) setReadyId(requestedFor);
-      })
-      .finally(() => {
-        if (loadedFor.current === requestedFor) setBuffering(false);
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videoId]);
-
-  // follow shared play/pause + timestamp
+  // Fetch queue suggestions based on currently playing track
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio || !videoId || readyId !== videoId || !music) return;
-    const target = expectedPosition(music);
-    if (Math.abs(currentTime() - target) > 1) engineSeek(target);
-    if (music.is_playing) enginePlay();
-    else enginePause();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [music?.is_playing, music?.position_seconds, music?.updated_date, videoId, readyId]);
-
-  // re-sync after the phone wakes from lock / tab returns
-  useEffect(() => {
-    async function resync() {
-      if (document.visibilityState !== "visible") return;
-      const results = await db.entities.MusicState.filter({ room_id: room.id });
-      const fresh = results[0] ?? null;
-      if (!fresh || !fresh.video_id || readyId !== fresh.video_id) return;
-      const target = expectedPosition(fresh);
-      if (Math.abs(currentTime() - target) > 1) engineSeek(target);
-      if (fresh.is_playing) enginePlay();
-      else enginePause();
+    if (!videoId && !music?.artist) {
+      setQueueSuggestions([]);
+      return;
     }
-    document.addEventListener("visibilitychange", resync);
-    window.addEventListener("focus", resync);
+    let active = true;
+    setLoadingQueueSuggestions(true);
+    getQueueSuggestions(videoId, music?.artist)
+      .then((recs) => {
+        if (!active) return;
+        // Filter out items already in queue
+        const existingIds = new Set((queue || []).map((t) => t.videoId));
+        const fresh = recs.filter((r) => !existingIds.has(r.videoId));
+        setQueueSuggestions(fresh);
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setLoadingQueueSuggestions(false);
+      });
     return () => {
-      document.removeEventListener("visibilitychange", resync);
-      window.removeEventListener("focus", resync);
+      active = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [room.id, readyId]);
+  }, [videoId, music?.artist, queue.length]);
 
-  // volume
-  useEffect(() => {
-    if (audioRef.current) audioRef.current.volume = muted ? 0 : volume;
-    ytRef.current?.setVolume?.(muted ? 0 : Math.round(volume * 100));
-  }, [volume, muted]);
-
-  async function runSearch() {
-    if (!query.trim()) return;
+  async function runSearch(qToRun) {
+    const searchTerm = qToRun || query;
+    if (!searchTerm.trim()) return;
     setSearching(true);
+    setShowSuggestions(false);
+    setSuggestions([]);
     try {
-      const list = await searchTracks(query);
+      const list = await searchTracks(searchTerm);
       setResults(list);
       if (list.length === 0) toast.error("No tracks found.");
     } catch {
@@ -320,7 +310,8 @@ export default function MusicTab({ room, music }) {
     }
   }
 
-  async function addToQueue(track) {
+  async function addToQueue(e, track) {
+    e.stopPropagation();
     const current = musicRef.current;
     const currentQueue = current?.queue ?? [];
     const queueTrack = {
@@ -344,6 +335,8 @@ export default function MusicTab({ room, music }) {
       await push({ queue: nextQueue });
       toast.success("Added to queue");
     }
+
+    setQueueSuggestions((prev) => prev.filter((s) => s.videoId !== track.videoId));
   }
 
   async function removeFromQueue(index) {
@@ -377,24 +370,31 @@ export default function MusicTab({ room, music }) {
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
-      <div className="space-y-6">
+    <div className="grid gap-6 lg:grid-cols-[1fr_340px] w-full max-w-full min-w-0 overflow-hidden">
+      <div className="space-y-6 min-w-0">
         {/* Now Playing */}
-        <div className="card-cute p-6">
+        <div className="card-cute p-4 sm:p-6 min-w-0 overflow-hidden">
           {videoId ? (
-            <div className="flex gap-4">
-              {music?.thumbnail && (
+            <div className="flex flex-col sm:flex-row gap-4 sm:gap-5 items-center sm:items-start min-w-0">
+              {music?.thumbnail ? (
                 <img
                   src={music.thumbnail}
                   alt={music.title}
-                  className="size-20 rounded-xl object-cover"
+                  className="size-24 sm:size-32 rounded-2xl object-cover shadow-md shrink-0"
                 />
+              ) : (
+                <div className="flex size-24 sm:size-32 items-center justify-center rounded-2xl bg-secondary text-primary shrink-0">
+                  <Music2 className="size-8 sm:size-10" />
+                </div>
               )}
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold truncate">{music?.title ?? "Unknown"}</p>
-                <p className="text-sm text-muted-foreground truncate">{music?.artist}</p>
-                <div className="mt-3 flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">{formatTime(position)}</span>
+              <div className="flex-1 min-w-0 w-full text-center sm:text-left">
+                <p className="font-display text-base sm:text-lg font-bold truncate">{music?.title ?? "Unknown"}</p>
+                <p className="text-xs sm:text-sm text-muted-foreground truncate">{music?.artist}</p>
+
+                <div className="mt-3 sm:mt-4 flex items-center gap-1.5 sm:gap-2 w-full min-w-0">
+                  <span className="text-[11px] sm:text-xs font-mono text-muted-foreground w-8 sm:w-10 text-right shrink-0">
+                    {formatTime(position)}
+                  </span>
                   <Slider
                     value={[Math.min(position, duration || position)]}
                     max={duration || 1}
@@ -406,48 +406,55 @@ export default function MusicTab({ room, music }) {
                       setScrubbing(false);
                       push({ position_seconds: v[0] });
                     }}
-                    className="flex-1"
+                    className="flex-1 min-w-0"
                   />
-                  <span className="text-xs text-muted-foreground">{formatTime(duration)}</span>
+                  <span className="text-[11px] sm:text-xs font-mono text-muted-foreground w-8 sm:w-10 shrink-0">
+                    {formatTime(duration)}
+                  </span>
                 </div>
-                <div className="mt-3 flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => push({ shuffle: !shuffle })}
-                  >
-                    <Shuffle className={shuffle ? "size-4 text-primary" : "size-4"} />
-                  </Button>
-                  <Button variant="ghost" size="icon" onClick={skipPrev}>
-                    <SkipBack className="size-4" />
-                  </Button>
-                  <Button size="icon" onClick={togglePlay} disabled={buffering}>
-                    {buffering ? (
-                      <Loader2 className="size-4 animate-spin" />
-                    ) : playing ? (
-                      <Pause className="size-4" />
-                    ) : (
-                      <Play className="size-4" />
-                    )}
-                  </Button>
-                  <Button variant="ghost" size="icon" onClick={() => skipNext(true)}>
-                    <SkipForward className="size-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon" onClick={cycleRepeat}>
-                    {repeatMode === "one" ? (
-                      <Repeat1 className="size-4 text-primary" />
-                    ) : (
-                      <Repeat
-                        className={
-                          repeatMode === "all" ? "size-4 text-primary" : "size-4"
-                        }
-                      />
-                    )}
-                  </Button>
-                  <div className="ml-2 flex items-center gap-1">
+
+                <div className="mt-3 sm:mt-4 flex flex-wrap items-center justify-between gap-2 sm:gap-3">
+                  <div className="flex items-center justify-center gap-0.5 sm:gap-1 mx-auto sm:mx-0 shrink-0">
                     <Button
                       variant="ghost"
                       size="icon"
+                      className="size-10 rounded-xl"
+                      onClick={() => push({ shuffle: !shuffle })}
+                      title="Shuffle"
+                    >
+                      <Shuffle className={shuffle ? "size-4 text-primary font-bold" : "size-4"} />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="size-10 rounded-xl" onClick={skipPrev} title="Previous">
+                      <SkipBack className="size-4" />
+                    </Button>
+                    <Button size="icon" className="size-12 rounded-2xl shadow-md active:scale-95 transition-transform" onClick={togglePlay}>
+                      {playing ? (
+                        <Pause className="size-6" />
+                      ) : (
+                        <Play className="size-6 ml-0.5" />
+                      )}
+                    </Button>
+                    <Button variant="ghost" size="icon" className="size-10 rounded-xl" onClick={() => skipNext(true)} title="Next">
+                      <SkipForward className="size-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="size-10 rounded-xl" onClick={cycleRepeat} title={`Repeat: ${repeatMode}`}>
+                      {repeatMode === "one" ? (
+                        <Repeat1 className="size-4 text-primary font-bold" />
+                      ) : (
+                        <Repeat
+                          className={
+                            repeatMode === "all" ? "size-4 text-primary font-bold" : "size-4"
+                          }
+                        />
+                      )}
+                    </Button>
+                  </div>
+
+                  <div className="hidden sm:flex items-center gap-1.5">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-9"
                       onClick={() => setMuted(!muted)}
                     >
                       {muted ? (
@@ -470,105 +477,220 @@ export default function MusicTab({ room, music }) {
               </div>
             </div>
           ) : (
-            <div className="flex flex-col items-center justify-center py-12 text-center text-muted-foreground">
-              <Music2 className="mb-3 size-12" />
-              <p>Search for a song to start playing together</p>
+            <div className="flex flex-col items-center justify-center py-10 text-center text-muted-foreground">
+              <div className="flex size-14 items-center justify-center rounded-3xl bg-secondary/80 text-primary mb-3">
+                <Music2 className="size-7" />
+              </div>
+              <p className="font-semibold text-foreground">No track currently playing</p>
+              <p className="text-xs mt-1 max-w-sm">
+                Search for any song below and tap it to start playing together immediately!
+              </p>
             </div>
           )}
         </div>
 
-        {/* Search */}
-        <div className="card-cute p-6">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              runSearch();
-            }}
-            className="flex gap-2"
-          >
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search for a song..."
-            />
-            <Button type="submit" disabled={searching}>
-              {searching ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Search className="size-4" />
-              )}
-            </Button>
-          </form>
+        {/* Search & Autocomplete */}
+        <div ref={searchContainerRef} className="card-cute p-5 sm:p-6 relative">
+          <h3 className="font-semibold mb-3 flex items-center gap-2 text-sm sm:text-base">
+            <Search className="size-4 text-primary" /> Search Songs
+          </h3>
+          <div className="relative">
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                runSearch();
+              }}
+              className="flex gap-2"
+            >
+              <div className="relative flex-1">
+                <Input
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onFocus={() => setShowSuggestions(suggestions.length > 0)}
+                  placeholder="Search artist, song, or video title..."
+                  className="rounded-xl pr-8 h-11 text-sm"
+                />
+              </div>
+              <Button type="submit" disabled={searching} className="rounded-xl px-5 h-11 min-w-[50px]">
+                {searching ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Search className="size-4" />
+                )}
+              </Button>
+            </form>
+
+            {/* Autocomplete Predictions Dropdown */}
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="absolute left-0 right-14 top-13 z-40 overflow-hidden rounded-xl border border-border bg-background shadow-2xl animate-in fade-in slide-in-from-top-1">
+                {suggestions.map((item, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => {
+                      setQuery(item);
+                      setShowSuggestions(false);
+                      setSuggestions([]);
+                      runSearch(item);
+                    }}
+                    className="flex w-full items-center gap-2.5 px-4 py-3 text-left text-sm hover:bg-secondary/70 transition-colors border-b border-border/40 last:border-0"
+                  >
+                    <Search className="size-3.5 text-muted-foreground shrink-0" />
+                    <span className="truncate">{item}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Search Results */}
           {results.length > 0 && (
-            <div className="mt-4 space-y-1">
+            <div className="mt-4 space-y-1.5 max-h-80 overflow-y-auto pr-1">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-1 mb-2">
+                Search Results ({results.length}) — Tap song to play immediately
+              </p>
               {results.map((track) => (
-                <button
+                <div
                   key={track.videoId}
-                  onClick={() => addToQueue(track)}
-                  className="flex w-full items-center gap-3 rounded-lg p-2 text-left hover:bg-secondary/50"
+                  onClick={() => playNow(track)}
+                  className="flex items-center gap-3 rounded-xl p-2.5 hover:bg-primary/10 border border-transparent hover:border-primary/20 transition-all cursor-pointer group"
                 >
-                  {track.thumbnail && (
+                  {track.thumbnail ? (
                     <img
                       src={track.thumbnail}
                       alt=""
-                      className="size-10 rounded object-cover"
+                      className="size-11 rounded-lg object-cover shrink-0 shadow-sm group-hover:scale-105 transition-transform"
                     />
+                  ) : (
+                    <div className="size-11 rounded-lg bg-secondary flex items-center justify-center shrink-0">
+                      <Music2 className="size-5 text-muted-foreground" />
+                    </div>
                   )}
                   <div className="flex-1 min-w-0">
-                    <p className="truncate text-sm font-medium">{track.title}</p>
+                    <p className="truncate text-sm font-semibold group-hover:text-primary transition-colors flex items-center gap-1.5">
+                      <Play className="size-3 fill-primary text-primary opacity-0 group-hover:opacity-100 transition-opacity" />
+                      <span>{track.title}</span>
+                    </p>
                     <p className="truncate text-xs text-muted-foreground">
                       {track.artist}
                     </p>
                   </div>
-                  <Plus className="size-4 text-muted-foreground" />
-                </button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="rounded-lg gap-1 px-2.5 h-8 text-xs shrink-0"
+                    onClick={(e) => addToQueue(e, track)}
+                    title="Add to queue without interrupting current track"
+                  >
+                    <Plus className="size-3.5" /> Queue
+                  </Button>
+                </div>
               ))}
             </div>
           )}
         </div>
 
-        <audio
-          ref={audioRef}
-          onTimeUpdate={() => {
-            if (!scrubbing) setPosition(audioRef.current?.currentTime ?? 0);
-          }}
-          onEnded={() => skipNext(true)}
-        />
-        <div ref={ytHostRef} className="hidden" />
+        {/* Queue Suggestions */}
+        {(queueSuggestions.length > 0 || loadingQueueSuggestions) && (
+          <div className="card-cute p-4 sm:p-6 min-w-0 overflow-hidden">
+            <div className="flex items-center justify-between mb-3 min-w-0">
+              <h3 className="font-semibold flex items-center gap-2 text-sm sm:text-base">
+                <Sparkles className="size-4 text-amber-500 fill-amber-500/20 shrink-0" /> Recommended For You
+              </h3>
+              <span className="text-[11px] sm:text-xs text-muted-foreground truncate ml-2">Based on current track</span>
+            </div>
+
+            {loadingQueueSuggestions ? (
+              <div className="flex items-center justify-center py-6 text-muted-foreground text-sm gap-2">
+                <Loader2 className="size-4 animate-spin text-primary" /> Finding recommendations...
+              </div>
+            ) : (
+              <div className="grid gap-2.5 sm:grid-cols-2 min-w-0 w-full">
+                {queueSuggestions.map((track) => (
+                  <div
+                    key={track.videoId}
+                    onClick={() => playNow(track)}
+                    className="flex items-center justify-between gap-2.5 rounded-xl border border-border/50 p-2 sm:p-2.5 hover:border-primary/40 hover:bg-primary/5 transition-all cursor-pointer group min-w-0 w-full overflow-hidden"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1 overflow-hidden">
+                      {track.thumbnail && (
+                        <img
+                          src={track.thumbnail}
+                          alt=""
+                          className="size-9 sm:size-10 rounded-lg object-cover shrink-0"
+                        />
+                      )}
+                      <div className="flex-1 min-w-0 overflow-hidden">
+                        <p className="truncate text-xs font-semibold group-hover:text-primary transition-colors">
+                          {track.title}
+                        </p>
+                        <p className="truncate text-[11px] text-muted-foreground">
+                          {track.artist}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="size-8 rounded-lg shrink-0 hover:bg-primary/10"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        addToQueue(e, track);
+                      }}
+                      title="Add to queue"
+                    >
+                      <Plus className="size-4 text-primary" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Queue */}
-      <div className="card-cute h-fit p-6">
-        <h3 className="flex items-center gap-2 font-semibold">
-          <ListMusic className="size-4" /> Queue ({queue.length})
-        </h3>
+      <div className="card-cute h-fit p-5 sm:p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="flex items-center gap-2 font-semibold text-sm sm:text-base">
+            <ListMusic className="size-4 text-primary" /> Shared Queue ({queue.length})
+          </h3>
+        </div>
         {queue.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">
-            No tracks queued yet.
+          <p className="py-10 text-center text-xs sm:text-sm text-muted-foreground">
+            No tracks in queue yet. Search for a song above to get started!
           </p>
         ) : (
-          <div className="mt-4 space-y-1">
+          <div className="space-y-1.5 max-h-[500px] overflow-y-auto pr-1">
             {queue.map((track, i) => (
               <div
                 key={i}
-                className={`flex items-center gap-3 rounded-lg p-2 ${
-                  i === queueIndex ? "bg-secondary" : ""
+                className={`flex items-center gap-3 rounded-xl p-2.5 transition-colors ${
+                  i === queueIndex
+                    ? "bg-primary/10 border border-primary/30"
+                    : "hover:bg-secondary/60"
                 }`}
               >
                 <button
                   onClick={() => playAt(i)}
-                  className="flex flex-1 items-center gap-3 text-left min-w-0"
+                  className="flex flex-1 items-center gap-3 text-left min-w-0 group"
                 >
-                  {track.thumbnail && (
+                  {track.thumbnail ? (
                     <img
                       src={track.thumbnail}
                       alt=""
-                      className="size-10 rounded object-cover"
+                      className="size-10 rounded-lg object-cover shrink-0"
                     />
+                  ) : (
+                    <div className="size-10 rounded-lg bg-secondary flex items-center justify-center shrink-0">
+                      <Music2 className="size-4 text-muted-foreground" />
+                    </div>
                   )}
                   <div className="flex-1 min-w-0">
-                    <p className="truncate text-sm font-medium">{track.title}</p>
-                    <p className="truncate text-xs text-muted-foreground">
+                    <p className={`truncate text-xs font-semibold ${i === queueIndex ? "text-primary font-bold" : "group-hover:text-foreground"}`}>
+                      {i === queueIndex && "▶ "} {track.title}
+                    </p>
+                    <p className="truncate text-[11px] text-muted-foreground">
                       {track.artist}
                     </p>
                   </div>
@@ -576,9 +698,11 @@ export default function MusicTab({ room, music }) {
                 <Button
                   variant="ghost"
                   size="icon"
+                  className="size-8 rounded-lg shrink-0"
                   onClick={() => removeFromQueue(i)}
+                  title="Remove from queue"
                 >
-                  <Trash2 className="size-4" />
+                  <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
                 </Button>
               </div>
             ))}

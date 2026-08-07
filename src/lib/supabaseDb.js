@@ -1,9 +1,30 @@
-import { supabase } from '@/api/supabaseClient';
+import {
+  firestore,
+  auth,
+  googleProvider,
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+  onSnapshot,
+  signInWithPopup,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
+  sendPasswordResetEmail,
+  updatePassword
+} from './firebase';
+import { compressImage } from './imageCompressor';
 
-// Helper for local storage persistence when Supabase table isn't created yet
+// Fallback local store in case offline or initial setup
 const getLocalStore = (table) => {
   try {
-    const raw = localStorage.getItem(`supabase_store_${table}`);
+    const raw = localStorage.getItem(`fb_store_${table}`);
     return raw ? JSON.parse(raw) : [];
   } catch (e) {
     return [];
@@ -12,8 +33,8 @@ const getLocalStore = (table) => {
 
 const setLocalStore = (table, items) => {
   try {
-    localStorage.setItem(`supabase_store_${table}`, JSON.stringify(items));
-    window.dispatchEvent(new CustomEvent(`supabase_local_${table}`, { detail: items }));
+    localStorage.setItem(`fb_store_${table}`, JSON.stringify(items));
+    window.dispatchEvent(new CustomEvent(`fb_local_${table}`, { detail: items }));
   } catch (e) {
     console.warn('Local storage write failed:', e);
   }
@@ -32,18 +53,24 @@ const createEntityStore = (entityName) => {
   return {
     filter: async (criteria = {}) => {
       try {
-        let query = supabase.from(tableName).select('*');
-        Object.entries(criteria).forEach(([key, val]) => {
-          query = query.eq(key, val);
-        });
-        const { data, error } = await query;
-        if (!error && Array.isArray(data)) {
-          return data;
+        const colRef = collection(firestore, tableName);
+        const entries = Object.entries(criteria);
+        let q;
+        if (entries.length > 0) {
+          const constraints = entries.map(([k, v]) => where(k, '==', v));
+          q = query(colRef, ...constraints);
+        } else {
+          q = query(colRef);
+        }
+        const snap = await getDocs(q);
+        const items = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        if (items.length > 0) {
+          return items;
         }
       } catch (e) {
-        // Table fallback
+        console.warn(`Firestore filter error for ${tableName}:`, e);
       }
-      
+
       // Fallback local store filtering
       const items = getLocalStore(tableName);
       return items.filter((item) =>
@@ -52,71 +79,91 @@ const createEntityStore = (entityName) => {
     },
 
     get: async (id) => {
+      if (!id) return null;
       try {
-        const { data, error } = await supabase.from(tableName).select('*').eq('id', id).single();
-        if (!error && data) return data;
-      } catch (e) {}
+        const docRef = doc(firestore, tableName, id);
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+          return { id: snap.id, ...snap.data() };
+        }
+      } catch (e) {
+        console.warn(`Firestore get error for ${tableName}/${id}:`, e);
+      }
 
       const items = getLocalStore(tableName);
       return items.find((item) => item.id === id) || null;
     },
 
     create: async (data) => {
+      const id = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : 'id_' + Math.random().toString(36).substring(2, 11);
       const newItem = {
-        id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'id_' + Math.random().toString(36).substring(2, 11),
+        id,
         created_date: new Date().toISOString(),
+        updated_date: new Date().toISOString(),
         ...data,
       };
 
       try {
-        const { data: inserted, error } = await supabase.from(tableName).insert(newItem).select().single();
-        if (!error && inserted) {
-          // Sync local
-          const local = getLocalStore(tableName);
-          setLocalStore(tableName, [inserted, ...local]);
-          return inserted;
-        }
-      } catch (e) {}
+        const docRef = doc(firestore, tableName, id);
+        await setDoc(docRef, newItem);
+        
+        // Sync local
+        const local = getLocalStore(tableName);
+        setLocalStore(tableName, [newItem, ...local.filter(i => i.id !== id)]);
+        return newItem;
+      } catch (e) {
+        console.warn(`Firestore create error for ${tableName}:`, e);
+      }
 
       const local = getLocalStore(tableName);
-      const updated = [newItem, ...local];
+      const updated = [newItem, ...local.filter(i => i.id !== id)];
       setLocalStore(tableName, updated);
       return newItem;
     },
 
     update: async (id, patch) => {
+      if (!id) return null;
+      const updateData = {
+        ...patch,
+        updated_date: new Date().toISOString()
+      };
+
       try {
-        const { data: updatedRow, error } = await supabase
-          .from(tableName)
-          .update(patch)
-          .eq('id', id)
-          .select()
-          .single();
-        if (!error && updatedRow) {
-          const local = getLocalStore(tableName);
-          const idx = local.findIndex(i => i.id === id);
-          if (idx !== -1) {
-            local[idx] = { ...local[idx], ...updatedRow };
-            setLocalStore(tableName, local);
-          }
-          return updatedRow;
+        const docRef = doc(firestore, tableName, id);
+        await setDoc(docRef, updateData, { merge: true });
+        
+        const local = getLocalStore(tableName);
+        const idx = local.findIndex(i => i.id === id);
+        if (idx !== -1) {
+          local[idx] = { ...local[idx], ...updateData };
+          setLocalStore(tableName, local);
+          return local[idx];
         }
-      } catch (e) {}
+        return { id, ...updateData };
+      } catch (e) {
+        console.warn(`Firestore update error for ${tableName}/${id}:`, e);
+      }
 
       const local = getLocalStore(tableName);
       const idx = local.findIndex((i) => i.id === id);
       if (idx !== -1) {
-        local[idx] = { ...local[idx], ...patch };
+        local[idx] = { ...local[idx], ...updateData };
         setLocalStore(tableName, local);
         return local[idx];
       }
-      return { id, ...patch };
+      return { id, ...updateData };
     },
 
     delete: async (id) => {
+      if (!id) return true;
       try {
-        await supabase.from(tableName).delete().eq('id', id);
-      } catch (e) {}
+        const docRef = doc(firestore, tableName, id);
+        await deleteDoc(docRef);
+      } catch (e) {
+        console.warn(`Firestore delete error for ${tableName}/${id}:`, e);
+      }
 
       const local = getLocalStore(tableName);
       const updated = local.filter((i) => i.id !== id);
@@ -125,24 +172,31 @@ const createEntityStore = (entityName) => {
     },
 
     subscribe: (callback) => {
-      let channel = null;
+      let unsub = null;
       try {
-        channel = supabase
-          .channel(`public:${tableName}`)
-          .on('postgres_changes', { event: '*', schema: 'public', table: tableName }, (payload) => {
-            callback({ type: payload.eventType, data: payload.new });
-          })
-          .subscribe();
-      } catch (e) {}
+        const colRef = collection(firestore, tableName);
+        unsub = onSnapshot(colRef, (snapshot) => {
+          snapshot.docChanges().forEach((change) => {
+            const data = { id: change.doc.id, ...change.doc.data() };
+            callback({ type: change.type, data });
+          });
+        }, (err) => {
+          if (err?.code !== 'unavailable') {
+            console.warn(`Firestore subscribe error for ${tableName}:`, err);
+          }
+        });
+      } catch (e) {
+        console.warn(`Firestore subscribe setup failed for ${tableName}:`, e);
+      }
 
       const handleLocal = (e) => {
         callback({ type: 'local_update', data: e.detail });
       };
-      window.addEventListener(`supabase_local_${tableName}`, handleLocal);
+      window.addEventListener(`fb_local_${tableName}`, handleLocal);
 
       return () => {
-        if (channel) supabase.removeChannel(channel);
-        window.removeEventListener(`supabase_local_${tableName}`, handleLocal);
+        if (unsub) unsub();
+        window.removeEventListener(`fb_local_${tableName}`, handleLocal);
       };
     }
   };
@@ -151,94 +205,87 @@ const createEntityStore = (entityName) => {
 export const db = {
   auth: {
     me: async () => {
-      const { data: { user }, error } = await supabase.auth.getUser();
-      if (error || !user) {
-        // Check session cached user
-        const { data: { session } } = await supabase.auth.getSession();
-        if (!session?.user) return null;
-        const u = session.user;
+      const user = auth.currentUser;
+      if (user) {
         return {
-          id: u.id,
-          email: u.email,
-          full_name: u.user_metadata?.full_name || u.user_metadata?.name || u.email?.split('@')[0],
+          id: user.uid,
+          email: user.email,
+          full_name: user.displayName || user.email?.split('@')[0] || 'User',
         };
       }
-      return {
-        id: user.id,
-        email: user.email,
-        full_name: user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split('@')[0],
-      };
+      // Check stored session
+      const stored = localStorage.getItem('fb_user_session');
+      if (stored) {
+        try {
+          return JSON.parse(stored);
+        } catch (e) {}
+      }
+      return null;
     },
 
     loginViaEmailPassword: async (email, password) => {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) throw new Error(error.message);
-      return {
-        id: data.user.id,
-        email: data.user.email,
-        full_name: data.user.user_metadata?.full_name || data.user.email?.split('@')[0],
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+      const user = cred.user;
+      const userInfo = {
+        id: user.uid,
+        email: user.email,
+        full_name: user.displayName || user.email?.split('@')[0],
       };
+      localStorage.setItem('fb_user_session', JSON.stringify(userInfo));
+      return userInfo;
     },
 
     loginWithProvider: async (provider = 'google', returnTo = '/') => {
-      const path = returnTo && returnTo.startsWith('/') ? returnTo : `/${returnTo || ''}`;
-      const redirectTo = `${window.location.origin}${path === '/' ? '' : path}`;
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider,
-        options: {
-          redirectTo,
-        },
-      });
-      if (error) throw new Error(error.message);
-      if (data?.url) {
-        window.location.href = data.url;
+      try {
+        const res = await signInWithPopup(auth, googleProvider);
+        if (res?.user) {
+          const user = res.user;
+          const userInfo = {
+            id: user.uid,
+            email: user.email,
+            full_name: user.displayName || user.email?.split('@')[0],
+          };
+          localStorage.setItem('fb_user_session', JSON.stringify(userInfo));
+          const path = returnTo && returnTo.startsWith('/') ? returnTo : `/${returnTo || ''}`;
+          window.location.href = path;
+        }
+      } catch (err) {
+        console.error('Google Sign In error:', err);
+        throw err;
       }
     },
 
     register: async ({ email, password }) => {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          emailRedirectTo: `${window.location.origin}/login`,
-        },
-      });
-      if (error) throw new Error(error.message);
-      return data;
+      const cred = await createUserWithEmailAndPassword(auth, email, password);
+      const user = cred.user;
+      const userInfo = {
+        id: user.uid,
+        email: user.email,
+        full_name: user.displayName || user.email?.split('@')[0],
+      };
+      localStorage.setItem('fb_user_session', JSON.stringify(userInfo));
+      return { user: userInfo, session: true };
     },
 
-    verifyOtp: async ({ email, otpCode }) => {
-      const { data, error } = await supabase.auth.verifyOtp({
-        email,
-        token: otpCode,
-        type: 'signup',
-      });
-      if (error) throw new Error(error.message);
-      return { access_token: data.session?.access_token };
+    verifyOtp: async () => {
+      return { access_token: 'firebase_token' };
     },
 
-    resendOtp: async (email) => {
-      const { error } = await supabase.auth.resend({
-        type: 'signup',
-        email,
-      });
-      if (error) throw new Error(error.message);
-    },
+    resendOtp: async () => {},
 
     resetPasswordRequest: async (email) => {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
-      });
-      if (error) throw new Error(error.message);
+      await sendPasswordResetEmail(auth, email);
     },
 
     resetPassword: async ({ newPassword }) => {
-      const { error } = await supabase.auth.updateUser({ password: newPassword });
-      if (error) throw new Error(error.message);
+      if (auth.currentUser) {
+        await updatePassword(auth.currentUser, newPassword);
+      }
     },
 
     logout: async (redirectUrl) => {
-      await supabase.auth.signOut();
+      await signOut(auth);
+      localStorage.removeItem('fb_user_session');
       if (redirectUrl) {
         window.location.href = redirectUrl;
       }
@@ -252,8 +299,7 @@ export const db = {
     setToken: () => {},
 
     isAuthenticated: async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      return Boolean(session);
+      return Boolean(auth.currentUser || localStorage.getItem('fb_user_session'));
     },
   },
 
@@ -271,24 +317,21 @@ export const db = {
       UploadFile: async ({ file }) => {
         if (!file) return { file_url: '' };
         try {
-          const fileName = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '')}`;
-          const { data, error } = await supabase.storage.from('memories').upload(fileName, file);
-          if (!error && data?.path) {
-            const { data: pubData } = supabase.storage.from('memories').getPublicUrl(data.path);
-            if (pubData?.publicUrl) return { file_url: pubData.publicUrl };
-          }
+          // Fast client-side image compression to ~100-200KB JPEG
+          const compressedDataUrl = await compressImage(file, 1200, 1200, 0.82);
+          return { file_url: compressedDataUrl };
         } catch (e) {
-          console.warn('Supabase storage upload fallback:', e);
+          console.warn('Image compression fallback:', e);
+          return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve({ file_url: e.target.result });
+            reader.readAsDataURL(file);
+          });
         }
-        return new Promise((resolve) => {
-          const reader = new FileReader();
-          reader.onload = (e) => resolve({ file_url: e.target.result });
-          reader.readAsDataURL(file);
-        });
       }
     }
   }
 };
 
-// Expose globally so all files with `const db = globalThis.__B44_DB__ || ...` pick up our Supabase client instance!
+// Expose globally so all components pick up Firebase db
 globalThis.__B44_DB__ = db;

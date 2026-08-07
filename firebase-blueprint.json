@@ -1,0 +1,43 @@
+{
+  "entities": {
+    "Room": {
+      "title": "Room",
+      "description": "Shared orbit room",
+      "properties": {
+        "invite_code": { "type": "string" },
+        "pet_name": { "type": "string" },
+        "hunger": { "type": "number" },
+        "happiness": { "type": "number" },
+        "sleep": { "type": "number" }
+      }
+    },
+    "RoomMember": {
+      "title": "Room Member",
+      "description": "Users in orbit",
+      "properties": {
+        "room_id": { "type": "string" },
+        "user_id": { "type": "string" },
+        "full_name": { "type": "string" },
+        "display_name": { "type": "string" }
+      }
+    },
+    "Memory": {
+      "title": "Scrapbook Memory",
+      "description": "Polaroid memory photo",
+      "properties": {
+        "room_id": { "type": "string" },
+        "title": { "type": "string" },
+        "image_url": { "type": "string" }
+      }
+    },
+    "MusicState": {
+      "title": "Music State",
+      "description": "Shared music playback state",
+      "properties": {
+        "room_id": { "type": "string" },
+        "video_id": { "type": "string" },
+        "is_playing": { "type": "boolean" }
+      }
+    }
+  }
+}

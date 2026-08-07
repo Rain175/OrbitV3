@@ -1,6 +1,6 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import { db } from '@/lib/supabaseDb';
-import { supabase } from '@/api/supabaseClient';
+import { auth, onAuthStateChanged } from '@/lib/firebase';
 
 const AuthContext = createContext();
 
@@ -11,35 +11,47 @@ export const AuthProvider = ({ children }) => {
   const [isLoadingPublicSettings, setIsLoadingPublicSettings] = useState(false);
   const [authError, setAuthError] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
-  const [appPublicSettings, setAppPublicSettings] = useState({ id: 'supabase', public_settings: {} });
+  const [appPublicSettings, setAppPublicSettings] = useState({ id: 'firebase', public_settings: {} });
 
   useEffect(() => {
     checkUserAuth();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        const u = session.user;
-        setUser({
-          id: u.id,
-          email: u.email,
-          full_name: u.user_metadata?.full_name || u.user_metadata?.name || u.email?.split('@')[0],
-        });
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser) => {
+      if (fbUser) {
+        const u = {
+          id: fbUser.uid,
+          email: fbUser.email,
+          full_name: fbUser.displayName || fbUser.email?.split('@')[0] || 'User',
+        };
+        setUser(u);
         setIsAuthenticated(true);
-      } else if (event === 'SIGNED_OUT') {
-        setUser(null);
-        setIsAuthenticated(false);
+        localStorage.setItem('fb_user_session', JSON.stringify(u));
+      } else {
+        const stored = localStorage.getItem('fb_user_session');
+        if (stored) {
+          try {
+            setUser(JSON.parse(stored));
+            setIsAuthenticated(true);
+          } catch (e) {
+            setUser(null);
+            setIsAuthenticated(false);
+          }
+        } else {
+          setUser(null);
+          setIsAuthenticated(false);
+        }
       }
       setIsLoadingAuth(false);
       setAuthChecked(true);
     });
 
     return () => {
-      subscription?.unsubscribe();
+      unsubscribe();
     };
   }, []);
 
   const checkAppState = async () => {
-    setAppPublicSettings({ id: 'supabase', public_settings: {} });
+    setAppPublicSettings({ id: 'firebase', public_settings: {} });
     setIsLoadingPublicSettings(false);
   };
 
@@ -101,4 +113,3 @@ export const useAuth = () => {
   }
   return context;
 };
-

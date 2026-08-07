@@ -75,6 +75,7 @@ export default function Onboarding() {
         hunger: 50,
         happiness: 50,
         sleep: 50,
+        love: 50,
       });
       await db.entities.MusicState.create({
         room_id: room.id,
