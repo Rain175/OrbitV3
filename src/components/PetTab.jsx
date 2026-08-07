@@ -83,9 +83,9 @@ export default function PetTab({ room, partner, onLocalUpdate }) {
     }
   }, [room, tamagotchiName, notifEnabled]);
 
-  // Periodic and on-load automatic stat decay (when awake)
+  // Periodic and on-load automatic stat decay / sleep recovery
   useEffect(() => {
-    if (!room?.id || sleeping) return;
+    if (!room?.id) return;
 
     const runDecayCheck = async () => {
       const patch = calculateDecayedStats(room);
@@ -98,7 +98,7 @@ export default function PetTab({ room, partner, onLocalUpdate }) {
     runDecayCheck();
     const timer = setInterval(runDecayCheck, 15000);
     return () => clearInterval(timer);
-  }, [room, sleeping]);
+  }, [room]);
 
   async function act(patch, emoji) {
     if (sleeping) {
@@ -351,16 +351,26 @@ export default function PetTab({ room, partner, onLocalUpdate }) {
             size="lg"
             variant="secondary"
             className="min-h-[48px] rounded-2xl font-semibold shadow-sm active:scale-95 transition-transform text-xs sm:text-sm px-2.5"
-            onClick={() =>
+            onClick={() => {
+              if (sleepVal <= 0 || hungerVal <= 0) {
+                toast.error(
+                  `Too tired or hungry to play! ${tamagotchiName} needs ${
+                    hungerVal <= 0 ? "food 🍓" : ""
+                  }${hungerVal <= 0 && sleepVal <= 0 ? " and " : ""}${
+                    sleepVal <= 0 ? "sleep 💤" : ""
+                  } first.`
+                );
+                return;
+              }
               act(
                 {
                   happiness: clamp(happinessVal + 6),
-                  hunger: clamp(hungerVal - 6),
-                  sleep: clamp(sleepVal - 5),
+                  hunger: clamp(hungerVal - 7),
+                  sleep: clamp(sleepVal - 1),
                 },
                 "💜"
-              )
-            }
+              );
+            }}
           >
             <Gamepad2 className="size-4 mr-1 shrink-0" /> Play
           </Button>

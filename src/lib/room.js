@@ -79,26 +79,38 @@ export function sleepPet(roomId) {
 
 export function calculateDecayedStats(room) {
   if (!room || !room.id) return null;
-  if (isPetSleeping(room.id)) return null;
+  const sleeping = isPetSleeping(room.id);
 
   const now = Date.now();
   const lastDecay = room.last_decay ? Number(room.last_decay) : now;
   const elapsedMs = now - lastDecay;
 
-  if (elapsedMs < 20000) return null;
+  if (elapsedMs < 10000) return null;
 
   const elapsedMins = Math.min(elapsedMs / (60 * 1000), 720);
 
-  // Happiness drops fast (~1.8% / min)
-  // Hunger drops gradually (~0.8% / min)
-  // Sleep drops gradually (~0.5% / min)
-  // Love drops gradually (~0.4% / min)
-  const happinessLoss = elapsedMins * 1.8;
+  if (sleeping) {
+    // In Sleep mode: Sleep meter goes up from 0 to 100 requiring 7 hours (420 minutes)
+    // Rate = 100 / 420 = ~0.2381% / min
+    const sleepGain = elapsedMins * (100 / 420);
+    const currentSleep = room.sleep ?? 50;
+
+    if (currentSleep >= 100 || sleepGain < 0.2) return null;
+
+    return {
+      sleep: clamp(currentSleep + sleepGain),
+      last_decay: now,
+    };
+  }
+
+  // Awake mode:
+  // Sleep depletes over 16 hours (960 minutes) = ~0.1042% / min
+  const sleepLoss = elapsedMins * (100 / 960);
+  const happinessLoss = elapsedMins * 1.5;
   const hungerLoss = elapsedMins * 0.8;
-  const sleepLoss = elapsedMins * 0.5;
   const loveLoss = elapsedMins * 0.4;
 
-  if (happinessLoss < 1 && hungerLoss < 1 && sleepLoss < 1 && loveLoss < 1) {
+  if (happinessLoss < 0.5 && hungerLoss < 0.5 && sleepLoss < 0.5 && loveLoss < 0.5) {
     return null;
   }
 
