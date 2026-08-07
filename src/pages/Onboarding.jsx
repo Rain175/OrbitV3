@@ -38,6 +38,15 @@ export default function Onboarding() {
       setChecking(false);
       return;
     }
+
+    // Fast path: check localStorage first (for PWA resume)
+    const savedRoomCode = localStorage.getItem("orbit_last_room_code");
+    if (savedRoomCode) {
+      navigate(`/room/${savedRoomCode}`, { replace: true });
+      return;
+    }
+
+    // Slower fallback: query database for latest room
     let active = true;
     (async () => {
       const members = await db.entities.RoomMember.filter({ user_id: user.id });
@@ -49,6 +58,7 @@ export default function Onboarding() {
         const latest = members[0];
         const room = await db.entities.Room.get(latest.room_id);
         if (room?.code && active) {
+          localStorage.setItem("orbit_last_room_code", room.code);
           navigate(`/room/${room.code}`, { replace: true });
           return;
         }
