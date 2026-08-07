@@ -8,10 +8,7 @@ import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import ScrollToTop from './components/ScrollToTop';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { Toaster as SonnerToaster } from 'sonner';
-<<<<<<< HEAD
 import PWAUpdatePrompt from '@/components/PWAUpdatePrompt';
-=======
->>>>>>> 13e6b186c4ffabcc0788291c04a71030eb4d1a80
 import Onboarding from '@/pages/Onboarding';
 import RoomPage from '@/pages/RoomPage';
 // Add page imports here
@@ -70,10 +67,7 @@ function App() {
         </Router>
         <Toaster />
         <SonnerToaster position="top-center" richColors />
-<<<<<<< HEAD
         <PWAUpdatePrompt />
-=======
->>>>>>> 13e6b186c4ffabcc0788291c04a71030eb4d1a80
       </QueryClientProvider>
     </AuthProvider>
   )
