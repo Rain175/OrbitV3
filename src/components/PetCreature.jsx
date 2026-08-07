@@ -14,6 +14,28 @@ export default function PetCreature({ mood, name, skin = "classic" }) {
   const sleeping = mood === "sleepy";
   const eyeY = mood === "sad" ? 3 : 0;
 
+  // Check if skin is an ID in PET_SKINS or a direct image URL / object
+  const skinDef = typeof skin === "object" ? skin : PET_SKINS.find((s) => s.id === skin);
+  const imageUrl = skinDef?.image || (typeof skin === "string" && (skin.startsWith("http") || skin.startsWith("data:") || skin.startsWith("/") || skin.endsWith(".png") || skin.endsWith(".webp") || skin.endsWith(".jpg")) ? skin : null);
+
+  // If this skin uses a custom PNG image
+  if (imageUrl) {
+    return (
+      <div className="relative size-52 flex items-center justify-center drop-shadow-[0_12px_24px_rgba(244,63,94,0.3)] transition-all duration-300">
+        <img
+          src={imageUrl}
+          alt={`${name} (${skinDef?.name || "Pet"})`}
+          className={`size-48 object-contain transition-transform duration-300 ${sleeping ? "opacity-80 grayscale-[20%]" : ""}`}
+        />
+        {sleeping && (
+          <div className="absolute top-2 right-4 text-xl font-bold animate-bounce text-pink-400">
+            Zzz...
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // Skin theme colors & shapes (Fixed vibrant hex values so dark theme does not alter pet colors)
   let bodyGrad1 = "#fff5f7";
   let bodyGrad2 = "#fbcfe8";
