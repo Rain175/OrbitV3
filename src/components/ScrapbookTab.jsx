@@ -1,3 +1,5 @@
+const db = globalThis.__B44_DB__ || { auth:{ isAuthenticated: async()=>false, me: async()=>null }, entities:new Proxy({}, { get:()=>({ filter:async()=>[], get:async()=>null, create:async()=>({}), update:async()=>({}), delete:async()=>({}) }) }), integrations:{ Core:{ UploadFile:async()=>({ file_url:'' }) } } };
+
 import { useState } from "react";
 import { Calendar, ImagePlus, Loader2, Maximize2, Trash2 } from "lucide-react";
 
@@ -15,7 +17,7 @@ import { toast } from "sonner";
 
 const ROTATIONS = ["-2.5deg", "1.8deg", "-1.2deg", "2.4deg", "-3deg", "1deg"];
 
-export function ScrapbookTab({ room, memories = [] }) {
+export default function ScrapbookTab({ room, memories = [] }) {
   const [title, setTitle] = useState("");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [caption, setCaption] = useState("");
